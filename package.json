@@ -1,0 +1,34 @@
+{
+  "name": "zurich-train-finder",
+  "version": "1.0.0",
+  "description": "macOS menu bar app showing Oerlikon departure countdowns",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.zurichtrainfinder.app",
+    "productName": "Zurich Train Finder",
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": ["dmg", "zip"],
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "assets/**/*"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "dependencies": {
+    "menubar": "^9.5.0"
+  }
+}

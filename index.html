@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oerlikon — When to Leave</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root {
+      --bg: #171412;
+      --surface: #211D1A;
+      --surface-raised: #2A2522;
+      --border: #362F2A;
+      --text: #EDE6DB;
+      --text-secondary: #A99E90;
+      --text-muted: #635A50;
+      --red: #DC3545;
+      --red-soft: rgba(220, 53, 69, 0.12);
+      --amber: #D4920A;
+      --amber-soft: rgba(212, 146, 10, 0.10);
+      --green: #2E9E5E;
+      --green-soft: rgba(46, 158, 94, 0.08);
+      --rose: #C44D6E;
+      --rose-soft: rgba(196, 77, 110, 0.12);
+      --tram-10-bg: #0066AB;
+      --tram-51-bg: #C8102E;
+      --platform-bg: #D4920A;
+      --train-bg: #4A3F8A;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Bricolage Grotesque', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Grain overlay */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      pointer-events: none;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+      background-repeat: repeat;
+      background-size: 200px;
+    }
+
+    .container {
+      max-width: 500px;
+      margin: 0 auto;
+      padding: 24px 20px 40px;
+    }
+
+    /* --- Header --- */
+
+    .header {
+      margin-bottom: 28px;
+      animation: fadeSlideIn 0.6s ease-out both;
+    }
+
+    .clock-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .clock {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      letter-spacing: 0.04em;
+    }
+
+    .refresh-ring {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+
+    .refresh-ring circle {
+      fill: none;
+      stroke-width: 2;
+    }
+
+    .refresh-ring .track {
+      stroke: var(--border);
+    }
+
+    .refresh-ring .progress {
+      stroke: var(--text-muted);
+      stroke-linecap: round;
+      transform: rotate(-90deg);
+      transform-origin: center;
+      transition: stroke-dashoffset 1s linear;
+    }
+
+    /* --- Leaflet Map --- */
+
+    #map {
+      width: 100%;
+      height: 220px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      margin-bottom: 20px;
+      animation: fadeSlideIn 0.5s ease-out both;
+      overflow: hidden;
+      background: var(--surface);
+      position: relative;
+    }
+
+    #map .leaflet-tile-pane { filter: sepia(0.08) brightness(0.9); }
+    #map .leaflet-control-attribution {
+      background: transparent !important;
+      font-size: 7px !important;
+      color: var(--text-muted) !important;
+      opacity: 0.4;
+      padding: 0 4px !important;
+    }
+    #map .leaflet-control-attribution a { color: var(--text-muted) !important; }
+
+    .station-marker-wrapper {
+      overflow: visible !important;
+      background: none !important;
+      border: none !important;
+    }
+
+    .station-marker { position: relative; width: 0; height: 0; }
+
+    .station-dot {
+      position: absolute;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      top: -5.5px;
+      left: -5.5px;
+      border: 2px solid var(--text-secondary);
+      background: var(--bg);
+      transition: all 0.4s ease;
+      z-index: 2;
+      box-shadow: 0 0 0 3px rgba(23,20,18,0.85);
+    }
+    .station-dot-inner {
+      position: absolute;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      top: 0;
+      left: 0;
+      background: transparent;
+      transition: all 0.4s ease;
+    }
+
+    .station-marker[data-u="green"] .station-dot {
+      background: var(--green);
+      border-color: rgba(237,230,219,0.45);
+      box-shadow: 0 0 0 3px rgba(23,20,18,0.6), 0 0 10px rgba(46,158,94,0.35);
+    }
+    .station-marker[data-u="amber"] .station-dot {
+      background: var(--amber);
+      border-color: rgba(237,230,219,0.45);
+      box-shadow: 0 0 0 3px rgba(23,20,18,0.6), 0 0 10px rgba(212,146,10,0.35);
+    }
+    .station-marker[data-u="red"] .station-dot {
+      background: var(--red);
+      border-color: rgba(237,230,219,0.45);
+      box-shadow: 0 0 0 3px rgba(23,20,18,0.5), 0 0 12px rgba(220,53,69,0.45);
+    }
+    .station-marker[data-u="red"] .station-dot-inner {
+      animation: pulse 1s ease-in-out infinite;
+      background: rgba(255,255,255,0.15);
+    }
+    .station-marker[data-u="none"] .station-dot {
+      background: var(--text-muted);
+      border-color: rgba(237,230,219,0.2);
+      box-shadow: 0 0 0 3px rgba(23,20,18,0.85);
+    }
+
+    .station-info {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      white-space: nowrap;
+      z-index: 1;
+    }
+    .station-info.right { left: 16px; }
+    .station-info.left { right: 16px; text-align: right; }
+
+    .station-name {
+      font-family: 'Bricolage Grotesque', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1;
+      text-shadow: 0 1px 4px var(--bg), 0 0 10px var(--bg), 0 0 20px var(--bg), 0 0 30px var(--bg);
+    }
+
+    .station-dir {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 7.5px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      text-shadow: 0 1px 4px var(--bg), 0 0 10px var(--bg), 0 0 20px var(--bg);
+    }
+
+    .station-cd {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.3;
+      transition: color 0.3s;
+      text-shadow: 0 1px 4px var(--bg), 0 0 10px var(--bg), 0 0 20px var(--bg);
+    }
+    .station-cd[data-u="green"] { color: var(--green); }
+    .station-cd[data-u="amber"] { color: var(--amber); }
+    .station-cd[data-u="red"]   { color: var(--red); }
+    .station-cd[data-u="none"]  { color: var(--text-muted); }
+
+    /* --- Details toggle --- */
+
+    .details-toggle {
+      display: none;
+    }
+
+    #content {
+      display: block;
+    }
+
+    /* --- Sections (detailed view) --- */
+
+    .section {
+      margin-bottom: 32px;
+      animation: fadeSlideIn 0.6s ease-out both;
+    }
+
+    .section:nth-child(2) { animation-delay: 0.1s; }
+    .section:nth-child(3) { animation-delay: 0.15s; }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .buffer-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      margin-left: auto;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .buffer-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      width: 22px;
+      height: 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .buffer-btn:hover {
+      color: var(--text);
+      background: var(--surface-raised);
+    }
+
+    .buffer-btn:active {
+      background: var(--border);
+    }
+
+    .buffer-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      min-width: 28px;
+      text-align: center;
+      padding: 0 2px;
+      font-variant-numeric: tabular-nums;
+      border-left: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      height: 22px;
+      line-height: 22px;
+    }
+
+    .section-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .section-sublabel {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    /* --- Line badges --- */
+
+    .line-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 36px;
+      height: 24px;
+      padding: 0 7px;
+      border-radius: 5px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .line-badge.tram-10 { background: var(--tram-10-bg); }
+    .line-badge.tram-51 { background: var(--tram-51-bg); }
+    .line-badge.train {
+      background: var(--train-bg);
+      font-size: 0.7rem;
+      min-width: 40px;
+    }
+
+    /* --- Departure rows --- */
+
+    .departures {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .dep-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border-radius: 8px;
+      transition: background 0.2s, transform 0.2s, opacity 0.3s;
+      animation: rowReveal 0.45s ease-out both;
+    }
+
+    .dep-row:hover:not(.missed) {
+      background: var(--surface-raised);
+      transform: translateY(-1px);
+    }
+
+    .dep-row.missed {
+      opacity: 0.45;
+    }
+
+    .dep-row.missed .dep-time {
+      text-decoration: line-through;
+      text-decoration-color: var(--rose);
+    }
+
+    .dep-time {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.92rem;
+      font-weight: 500;
+      color: var(--text);
+      min-width: 44px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .dep-delay {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem;
+      font-weight: 500;
+      color: var(--red);
+      min-width: 24px;
+    }
+
+    .dep-platform {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 26px;
+      height: 20px;
+      padding: 0 5px;
+      border-radius: 4px;
+      background: rgba(212, 146, 10, 0.15);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: var(--platform-bg);
+    }
+
+    .dep-dest {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    .dep-travel {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+      letter-spacing: 0.01em;
+    }
+
+    .dep-travel-fast {
+      color: var(--green);
+      border-color: rgba(46, 158, 94, 0.25);
+    }
+
+    /* --- The hero: countdown --- */
+
+    .countdown {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      text-align: right;
+      white-space: nowrap;
+      padding: 3px 9px;
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+
+    .countdown-num {
+      font-size: 1.15rem;
+    }
+
+    .countdown-unit {
+      font-size: 0.6rem;
+      font-weight: 500;
+      opacity: 0.7;
+      margin-left: 1px;
+    }
+
+    .countdown.green {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .countdown.amber {
+      color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .countdown.red {
+      color: var(--red);
+      background: var(--red-soft);
+      animation: urgentPulse 1.5s ease-in-out infinite;
+    }
+
+    .countdown.rose {
+      color: var(--rose);
+      background: var(--rose-soft);
+    }
+
+    /* --- Train row (combined badge + platform) --- */
+
+    .train-row .line-badge {
+      flex-shrink: 0;
+    }
+
+    /* --- Footer --- */
+
+    .footer {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: 24px;
+      opacity: 0.6;
+    }
+
+    .no-deps {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      padding: 12px;
+      font-style: italic;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    /* --- Animations --- */
+
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes rowReveal {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.3; }
+    }
+
+    @keyframes urgentPulse {
+      0%, 100% { background: var(--red-soft); }
+      50%      { background: rgba(220, 53, 69, 0.25); }
+    }
+
+    @keyframes rowExit {
+      to { opacity: 0; transform: translateX(12px); height: 0; padding: 0 12px; margin: 0; }
+    }
+
+    .dep-row.exiting {
+      animation: rowExit 0.4s ease-in forwards;
+      overflow: hidden;
+    }
+
+    .countdown-num, .countdown-unit {
+      transition: none;
+    }
+
+    /* --- Menu bar mode (tighter layout for 420px dropdown) --- */
+    body.menubar-mode {
+      min-height: auto;
+      overflow: hidden;
+    }
+    body.menubar-mode .container {
+      padding: 14px 14px 20px;
+    }
+    body.menubar-mode .header {
+      margin-bottom: 16px;
+    }
+    body.menubar-mode .transit-map {
+      margin-bottom: 12px;
+    }
+    body.menubar-mode .section {
+      margin-bottom: 20px;
+    }
+    body.menubar-mode .dep-row {
+      padding: 6px 10px;
+    }
+    body.menubar-mode .footer {
+      margin-top: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="clock-row">
+        <div class="live-dot"></div>
+        <div class="clock" id="clock"></div>
+        <svg class="refresh-ring" viewBox="0 0 16 16">
+          <circle class="track" cx="8" cy="8" r="6" />
+          <circle class="progress" id="refresh-progress" cx="8" cy="8" r="6"
+            stroke-dasharray="37.7" stroke-dashoffset="0" />
+        </svg>
+      </div>
+    </header>
+
+    <!-- Zürich map -->
+    <div id="map"></div>
+
+    <button class="details-toggle" id="details-toggle">
+      <span class="toggle-icon">&#9656;</span> All departures
+    </button>
+
+    <div id="content"></div>
+
+    <div class="footer" id="footer"></div>
+  </div>
+
+  <script>
+    const TRAIN_STATION_ID = '8503006';
+    const MAX_LEAD_MINUTES = 20;
+    const MISSED_REMOVE_MINUTES = -3;
+    const REFRESH_INTERVAL = 30000;
+    const COUNTDOWN_TICK = 1000;
+
+    // --- Per-section lead times (persisted in localStorage) ---
+
+    const savedBuffers = JSON.parse(localStorage.getItem('buffers') || '{}');
+
+    const TRAM_STATIONS = [
+      {
+        id: '8591063',
+        label: 'Trams',
+        sublabel: 'Bahnhof Ost',
+        direction: 'Downtown',
+        containerId: 'tram-bahnhof-ost',
+        bufferKey: 'bahnhof-ost',
+        leadTime: savedBuffers['bahnhof-ost'] ?? 7,
+        lines: {
+          '10': { css: 'tram-10', toward: 'Bahnhofplatz/HB' },
+          '51': { css: 'tram-51', toward: 'Altstetten' },
+        },
+      },
+      {
+        id: '8591073',
+        label: 'Trams',
+        sublabel: 'Berninaplatz',
+        direction: 'Oerlikon',
+        containerId: 'tram-berninaplatz',
+        bufferKey: 'berninaplatz',
+        leadTime: savedBuffers['berninaplatz'] ?? 3,
+        lines: {
+          '10': { css: 'tram-10', toward: 'Flughafen' },
+          '51': { css: 'tram-51', toward: 'Seebach' },
+        },
+      },
+    ];
+
+    const TRAIN_SECTION = {
+      containerId: 'train-deps',
+      bufferKey: 'trains',
+      direction: 'Zürich HB',
+      leadTime: savedBuffers['trains'] ?? 7,
+    };
+
+    function saveBuffers() {
+      const obj = {};
+      TRAM_STATIONS.forEach(s => obj[s.bufferKey] = s.leadTime);
+      obj[TRAIN_SECTION.bufferKey] = TRAIN_SECTION.leadTime;
+      localStorage.setItem('buffers', JSON.stringify(obj));
+    }
+
+    // Cached data from last fetch (for re-patching on buffer change)
+    let lastTramResults = [];
+    let lastTrains = [];
+
+    let structureBuilt = false;
+
+    // --- Clock + refresh ring ---
+
+    let lastRefreshAt = Date.now();
+    const RING_CIRCUMFERENCE = 37.7;
+
+    function tickClock() {
+      document.getElementById('clock').textContent =
+        new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      const elapsed = Date.now() - lastRefreshAt;
+      const pct = Math.min(elapsed / REFRESH_INTERVAL, 1);
+      const offset = RING_CIRCUMFERENCE * (1 - pct);
+      const ring = document.getElementById('refresh-progress');
+      if (ring) ring.setAttribute('stroke-dashoffset', offset);
+    }
+    tickClock();
+    setInterval(tickClock, 1000);
+
+    // --- Leaflet map ---
+
+    function initMap() {
+      const map = L.map('map', {
+        zoomControl: false,
+        attributionControl: true,
+        dragging: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        touchZoom: false,
+        boxZoom: false,
+        keyboard: false,
+      });
+
+      // Fit all three stations with padding
+      map.fitBounds([
+        [47.400, 8.536],
+        [47.418, 8.554],
+      ]);
+
+      const r = window.devicePixelRatio > 1 ? '@2x.png' : '.png';
+      L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}${r}`, {
+        subdomains: 'abcd',
+        maxZoom: 20,
+        attribution: '&copy; <a href="https://osm.org/copyright">OSM</a> &middot; <a href="https://carto.com">CARTO</a>',
+      }).addTo(map);
+
+      // Real OSM route geometries (simplified from OpenStreetMap Overpass API, ODbL)
+      const off = 0.00012;
+
+      // Tram 10 (blue): Flughafen → HB via Oerlikon
+      const tram10 = [[47.452067,8.571284],[47.452039,8.571685],[47.452082,8.572102],[47.452449,8.572769],[47.452807,8.572587],[47.452354,8.572113],[47.452108,8.571796],[47.452093,8.571365],[47.452135,8.570767],[47.452210,8.569720],[47.452260,8.569130],[47.452306,8.568583],[47.452397,8.567330],[47.452415,8.566914],[47.452363,8.566330],[47.452302,8.565773],[47.452197,8.565368],[47.451480,8.564623],[47.451157,8.564344],[47.450584,8.564138],[47.450191,8.564054],[47.449774,8.564096],[47.449375,8.564246],[47.449019,8.564464],[47.448764,8.564778],[47.448625,8.565197],[47.448263,8.566667],[47.448161,8.567054],[47.448012,8.567495],[47.447854,8.567868],[47.447667,8.568227],[47.447401,8.568657],[47.447103,8.569059],[47.446811,8.569391],[47.446514,8.569678],[47.446181,8.569935],[47.445766,8.570150],[47.445376,8.570253],[47.444781,8.570307],[47.444380,8.570289],[47.443945,8.570174],[47.443522,8.570015],[47.443096,8.569813],[47.442265,8.569353],[47.441928,8.569108],[47.441689,8.568679],[47.441482,8.568251],[47.441099,8.567459],[47.440905,8.567086],[47.440627,8.566738],[47.440339,8.566408],[47.440048,8.565961],[47.439631,8.565289],[47.439039,8.564338],[47.438462,8.563412],[47.438222,8.563014],[47.437927,8.562505],[47.437683,8.562069],[47.437212,8.561171],[47.436475,8.559693],[47.436285,8.559309],[47.436024,8.558781],[47.435819,8.558381],[47.435573,8.558018],[47.435219,8.557659],[47.434789,8.557262],[47.434410,8.556912],[47.434093,8.556599],[47.433695,8.556117],[47.433385,8.555847],[47.432982,8.555956],[47.431532,8.558329],[47.431282,8.558700],[47.430985,8.559003],[47.430657,8.559269],[47.430269,8.559496],[47.429846,8.559664],[47.429185,8.559857],[47.428687,8.559936],[47.428150,8.559904],[47.427656,8.559861],[47.427221,8.560045],[47.426945,8.560368],[47.426646,8.560732],[47.426273,8.560966],[47.425822,8.560931],[47.425457,8.560677],[47.425063,8.560348],[47.424490,8.559866],[47.424134,8.559581],[47.423504,8.559079],[47.421966,8.557855],[47.421558,8.557529],[47.421183,8.557218],[47.420672,8.556755],[47.420396,8.556465],[47.420088,8.556148],[47.419663,8.555770],[47.419326,8.555461],[47.418918,8.555052],[47.418613,8.554764],[47.418157,8.554347],[47.417848,8.554066],[47.417519,8.553765],[47.416348,8.552694],[47.415345,8.551776],[47.415015,8.551507],[47.414553,8.551200],[47.414262,8.550909],[47.414196,8.550445],[47.414119,8.549681],[47.414074,8.549215],[47.414013,8.548668],[47.413919,8.547711],[47.413878,8.547295],[47.413845,8.546848],[47.413731,8.546441],[47.413250,8.546178],[47.412817,8.546291],[47.412292,8.546470],[47.411691,8.546674],[47.411257,8.546815],[47.410615,8.546512],[47.410295,8.546224],[47.409645,8.546261],[47.409016,8.546471],[47.408567,8.546613],[47.408134,8.546711],[47.407705,8.546925],[47.407354,8.547254],[47.406724,8.547980],[47.406376,8.548267],[47.405991,8.548391],[47.405203,8.548387],[47.404692,8.548320],[47.404275,8.548232],[47.403879,8.548086],[47.403535,8.547800],[47.403281,8.547459],[47.401522,8.545340],[47.401256,8.544987],[47.400602,8.543992],[47.400162,8.543322],[47.399908,8.542997],[47.399563,8.542755],[47.399109,8.542689],[47.398677,8.542508],[47.398331,8.542226],[47.397850,8.541882],[47.397465,8.541637],[47.397035,8.541496],[47.396749,8.541804],[47.396494,8.543117],[47.396410,8.543618],[47.396308,8.544153],[47.396209,8.544647],[47.396128,8.545061],[47.395795,8.545339],[47.395065,8.545161],[47.394613,8.545048],[47.394192,8.544946],[47.393775,8.544940],[47.393157,8.545004],[47.392595,8.545064],[47.391829,8.545144],[47.391246,8.545281],[47.390857,8.545404],[47.390436,8.545537],[47.389565,8.545999],[47.389113,8.546233],[47.388723,8.546447],[47.388362,8.546658],[47.387670,8.547040],[47.387278,8.547256],[47.386902,8.547470],[47.386551,8.547754],[47.386247,8.548063],[47.385924,8.548348],[47.385482,8.548443],[47.384637,8.548333],[47.384158,8.548285],[47.383699,8.548194],[47.383240,8.548131],[47.382809,8.548123],[47.382124,8.548144],[47.380397,8.548130],[47.378180,8.548101],[47.377622,8.548238],[47.377275,8.547968],[47.377178,8.547505],[47.377064,8.546958],[47.377089,8.546533],[47.378483,8.545608],[47.378847,8.545373],[47.379153,8.544984],[47.379413,8.544670],[47.379349,8.544269],[47.378813,8.544263],[47.378135,8.544284],[47.377201,8.544256],[47.376903,8.543941],[47.376854,8.543522],[47.376889,8.543043],[47.376951,8.542307],[47.376994,8.541852],[47.377079,8.541458],[47.377067,8.540995],[47.377048,8.540519],[47.377060,8.540071],[47.377161,8.539666],[47.377311,8.539120]];
+      L.polyline(tram10.map(([a, b]) => [a, b - off]), {
+        color: '#5BA4D9', weight: 3, opacity: 0.5, lineCap: 'round', lineJoin: 'round',
+      }).addTo(map);
+
+      // Tram 51 (red): Seebach → Altstetten via Oerlikon
+      const tram51 = [[47.421679,8.549978],[47.420888,8.549338],[47.420511,8.548945],[47.420146,8.548593],[47.419788,8.548217],[47.419303,8.547731],[47.418749,8.547228],[47.418454,8.546936],[47.418008,8.546446],[47.417593,8.546020],[47.417304,8.545734],[47.416652,8.545279],[47.416024,8.545110],[47.415402,8.545389],[47.414988,8.545536],[47.414118,8.545496],[47.413267,8.545976],[47.412693,8.546336],[47.412292,8.546470],[47.411691,8.546674],[47.411016,8.546798],[47.410615,8.546512],[47.410044,8.546140],[47.409645,8.546261],[47.408817,8.546540],[47.408370,8.546655],[47.407705,8.546925],[47.407157,8.547481],[47.406724,8.547980],[47.406195,8.548347],[47.405203,8.548387],[47.404275,8.548232],[47.403657,8.547924],[47.403226,8.547389],[47.401522,8.545340],[47.400602,8.543992],[47.400162,8.543322],[47.399720,8.542838],[47.399109,8.542689],[47.398468,8.542348],[47.397850,8.541882],[47.397465,8.541637],[47.397120,8.541387],[47.396751,8.540876],[47.396281,8.540526],[47.395925,8.540295],[47.395283,8.539884],[47.394650,8.539547],[47.394034,8.539297],[47.393530,8.539163],[47.392847,8.539006],[47.392419,8.538899],[47.391554,8.538837],[47.390776,8.538848],[47.390207,8.539002],[47.389142,8.539053],[47.388738,8.539034],[47.388127,8.539234],[47.387528,8.539542],[47.386812,8.539661],[47.385882,8.539793],[47.385384,8.539863],[47.384793,8.539941],[47.384149,8.540193],[47.383526,8.540769],[47.382649,8.541533],[47.381966,8.541773],[47.381212,8.542195],[47.380689,8.542597],[47.380102,8.542616],[47.379286,8.542816],[47.378760,8.542720],[47.378665,8.542097],[47.378538,8.541478],[47.378544,8.540793],[47.378977,8.539037],[47.379191,8.538408],[47.379464,8.537712],[47.380072,8.537640],[47.380406,8.537382],[47.381335,8.536090],[47.381823,8.535431],[47.382361,8.534730],[47.382644,8.534322],[47.383349,8.533371],[47.384165,8.532270],[47.384412,8.531937],[47.384756,8.531473],[47.385972,8.529831],[47.386889,8.528594],[47.387370,8.527859],[47.387737,8.527273],[47.387950,8.526913],[47.388539,8.525874],[47.389068,8.524955],[47.389426,8.524444],[47.389868,8.523866],[47.390269,8.523316],[47.390630,8.522749],[47.390368,8.522138],[47.389665,8.521454],[47.388250,8.520065],[47.387626,8.519455],[47.387453,8.518895],[47.387988,8.517797],[47.388569,8.516624],[47.388796,8.516122],[47.388970,8.515629],[47.389159,8.515056],[47.389351,8.514403],[47.389592,8.513109],[47.389691,8.512552],[47.389854,8.511791],[47.390063,8.511165],[47.390274,8.510459],[47.390430,8.509897],[47.390762,8.508739],[47.391502,8.506258],[47.391692,8.505623],[47.392004,8.504592],[47.392159,8.504075],[47.392313,8.503557],[47.392322,8.502938],[47.392112,8.502190],[47.392049,8.501391],[47.392064,8.500979],[47.392072,8.500517],[47.392077,8.499225],[47.392082,8.497957],[47.392084,8.497243],[47.392089,8.496328],[47.392094,8.495654],[47.392098,8.495185],[47.392103,8.494544],[47.392106,8.494123],[47.392104,8.493711],[47.392088,8.492978],[47.392148,8.492199],[47.392245,8.491704],[47.392388,8.491172],[47.392626,8.490302],[47.392431,8.489757],[47.392044,8.490441]];
+      L.polyline(tram51.map(([a, b]) => [a, b + off]), {
+        color: '#E85D5D', weight: 3, opacity: 0.5, lineCap: 'round', lineJoin: 'round',
+      }).addTo(map);
+
+      // S-Bahn (purple): HB → Hardbrücke → Oerlikon
+      const sBahn = [[47.375386,8.546670],[47.375806,8.546301],[47.376204,8.545882],[47.376564,8.545391],[47.376787,8.544996],[47.376992,8.544551],[47.377150,8.544175],[47.377301,8.543800],[47.377612,8.542991],[47.377779,8.542535],[47.377943,8.542075],[47.378284,8.541036],[47.378508,8.540323],[47.378850,8.539060],[47.379524,8.536575],[47.379728,8.535824],[47.379857,8.535348],[47.380043,8.534591],[47.380248,8.533560],[47.380392,8.532918],[47.380549,8.532317],[47.380830,8.531288],[47.381003,8.530464],[47.381112,8.529882],[47.381222,8.529312],[47.381408,8.528561],[47.381659,8.527868],[47.381965,8.527242],[47.382271,8.526685],[47.382635,8.525964],[47.382923,8.525307],[47.383206,8.524558],[47.383350,8.524128],[47.383542,8.523469],[47.383673,8.522974],[47.384210,8.520944],[47.384394,8.520215],[47.384599,8.519304],[47.385100,8.517415],[47.385498,8.515943],[47.385662,8.515342],[47.385805,8.514816],[47.386004,8.514073],[47.386117,8.513679],[47.386350,8.512999],[47.386548,8.512562],[47.386866,8.512023],[47.387357,8.511431],[47.387887,8.511004],[47.388469,8.510722],[47.389183,8.510599],[47.389587,8.510627],[47.390351,8.510867],[47.390834,8.511097],[47.391311,8.511333],[47.392152,8.511790],[47.393150,8.512339],[47.394038,8.512826],[47.394821,8.513255],[47.395239,8.513486],[47.395663,8.513730],[47.396068,8.514001],[47.396424,8.514282],[47.396953,8.514769],[47.397538,8.515421],[47.398249,8.516413],[47.398533,8.516899],[47.398774,8.517357],[47.399027,8.517907],[47.399282,8.518525],[47.399472,8.519075],[47.399654,8.519673],[47.399796,8.520212],[47.399903,8.520675],[47.400128,8.521695],[47.401741,8.529134],[47.401897,8.529823],[47.402052,8.530433],[47.402228,8.531017],[47.402476,8.531729],[47.402663,8.532175],[47.403021,8.532938],[47.403471,8.533741],[47.403994,8.534486],[47.404345,8.534928],[47.404708,8.535315],[47.405343,8.535913],[47.405718,8.536204],[47.406171,8.536499],[47.406726,8.536813],[47.407241,8.537088],[47.407706,8.537341],[47.408047,8.537557],[47.408781,8.538163],[47.409237,8.538655],[47.409604,8.539142],[47.409855,8.539523],[47.410154,8.540035],[47.410651,8.540907],[47.411028,8.541603],[47.411257,8.542043],[47.411442,8.542406],[47.411707,8.542987],[47.411990,8.543728],[47.412160,8.544218],[47.412449,8.545038],[47.412726,8.545765],[47.413025,8.546333],[47.413429,8.546885],[47.413998,8.547498],[47.414480,8.547965],[47.414717,8.548177]];
+      L.polyline(sBahn, {
+        color: '#9B8EC4', weight: 3, opacity: 0.5, lineCap: 'round', lineJoin: 'round',
+      }).addTo(map);
+
+      // Proximity dashed line: Bhf Ost ↔ Bhf Oerlikon
+      L.polyline([
+        [47.413326, 8.545847],
+        [47.411526, 8.544140],
+      ], { color: '#A99E90', weight: 1, opacity: 0.2, dashArray: '4,4' }).addTo(map);
+
+      // Station markers
+      [
+        { id: 'bhf-ost',     lat: 47.413326, lng: 8.545847, name: 'Bhf Ost',     dir: '\u2192 Downtown',  side: 'right' },
+        { id: 'berninaplatz', lat: 47.403628, lng: 8.547911, name: 'Berninaplatz', dir: '\u2192 Oerlikon',  side: 'right' },
+        { id: 'trains',      lat: 47.411526, lng: 8.544140, name: 'Bhf Oerlikon', dir: '\u2192 Z\u00fcrich HB', side: 'left'  },
+      ].forEach(s => {
+        const icon = L.divIcon({
+          className: 'station-marker-wrapper',
+          html: `<div class="station-marker" id="marker-${s.id}" data-u="none">` +
+            `<div class="station-dot"><div class="station-dot-inner"></div></div>` +
+            `<div class="station-info ${s.side}">` +
+              `<div class="station-name">${s.name}</div>` +
+              `<div class="station-dir">${s.dir}</div>` +
+              `<div class="station-cd" id="marker-cd-${s.id}" data-u="none">\u2014</div>` +
+            `</div></div>`,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0],
+        });
+        L.marker([s.lat, s.lng], { icon, interactive: false }).addTo(map);
+      });
+    }
+
+    if (typeof L !== 'undefined') initMap();
+
+    // --- Helpers ---
+
+    function formatTime(ts) {
+      return new Date(ts * 1000).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function getRealTimestamp(dep) {
+      const prog = dep.stop.prognosis.departure;
+      return prog ? Math.round(new Date(prog).getTime() / 1000) : dep.stop.departureTimestamp;
+    }
+
+    function depKey(dep, type) {
+      const stationId = dep.stop.station?.id || '';
+      return `${type}-${stationId}-${dep.number}-${dep.stop.departureTimestamp}`;
+    }
+
+    function minsUntilLeave(realTimestamp, leadTime) {
+      const nowSec = Math.round(Date.now() / 1000);
+      const leaveAtSec = realTimestamp - leadTime * 60;
+      return Math.round((leaveAtSec - nowSec) / 60);
+    }
+
+    function leaveByInfo(realTimestamp, leadTime) {
+      const m = minsUntilLeave(realTimestamp, leadTime);
+
+      if (m < 0)   return { html: `<span class="countdown-num">${m}</span><span class="countdown-unit">min</span>`, css: 'red', missed: false };
+      if (m <= 0)  return { html: '<span class="countdown-num">GO</span>', css: 'red', missed: false };
+      if (m <= 3)  return { html: `<span class="countdown-num">${m}</span><span class="countdown-unit">min</span>`, css: 'amber', missed: false };
+      return { html: `<span class="countdown-num">${m}</span><span class="countdown-unit">min</span>`, css: 'green', missed: false };
+    }
+
+    function getViableDeps(deps, leadTime) {
+      return deps
+        .filter(dep => {
+          const m = minsUntilLeave(getRealTimestamp(dep), leadTime);
+          return m > MISSED_REMOVE_MINUTES && m <= MAX_LEAD_MINUTES;
+        })
+        .sort((a, b) => getRealTimestamp(a) - getRealTimestamp(b));
+    }
+
+    // --- Fetchers ---
+
+    async function fetchTrams(station) {
+      const url = `https://transport.opendata.ch/v1/stationboard?id=${station.id}&limit=30&transportations[]=tram`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data.stationboard.filter(dep => {
+        const cfg = station.lines[dep.number];
+        return cfg && dep.to.includes(cfg.toward);
+      });
+    }
+
+    async function fetchTrains() {
+      const url = `https://transport.opendata.ch/v1/stationboard?id=${TRAIN_STATION_ID}&limit=30`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data.stationboard
+        .filter(dep => {
+          const stops = (dep.passList || []).map(s => s.station.name || '');
+          return stops.some(s => s.includes('HB'));
+        })
+        .map(dep => {
+          const hbStop = (dep.passList || []).find(s =>
+            s.station.name && s.station.name.includes('HB')
+          );
+          const depTs = dep.stop.departureTimestamp;
+          const hbArrTs = hbStop && hbStop.arrivalTimestamp;
+          dep._travelMin = hbArrTs ? Math.round((hbArrTs - depTs) / 60) : null;
+          return dep;
+        });
+    }
+
+    // --- Transit map rendering ---
+
+    function updateMapNode(nodeKey, urgency) {
+      const markerId = nodeKey === 0 ? 'bhf-ost' : nodeKey === 1 ? 'berninaplatz' : 'trains';
+      const marker = document.getElementById(`marker-${markerId}`);
+      if (marker) marker.setAttribute('data-u', urgency);
+    }
+
+    function getStationUrgency(deps, leadTime) {
+      const viable = getViableDeps(deps, leadTime)
+        .filter(dep => !leaveByInfo(getRealTimestamp(dep), leadTime).missed);
+      if (viable.length === 0) return { urgency: 'none', cdText: '\u2014' };
+      const m = minsUntilLeave(getRealTimestamp(viable[0]), leadTime);
+      const urgency = m <= 0 ? 'red' : m <= 3 ? 'amber' : 'green';
+      const cdText = m <= 0 ? 'GO' : m + 'm';
+      return { urgency, cdText };
+    }
+
+    function renderTransitMap() {
+      const markerIds = ['bhf-ost', 'berninaplatz'];
+      TRAM_STATIONS.forEach((station, i) => {
+        const deps = lastTramResults[i] || [];
+        const { urgency, cdText } = getStationUrgency(deps, station.leadTime);
+        updateMapNode(i, urgency);
+        const cd = document.getElementById(`marker-cd-${markerIds[i]}`);
+        if (cd) { cd.textContent = cdText; cd.setAttribute('data-u', urgency); }
+      });
+
+      const { urgency, cdText } = getStationUrgency(lastTrains, TRAIN_SECTION.leadTime);
+      updateMapNode('trains', urgency);
+      const cd = document.getElementById('marker-cd-trains');
+      if (cd) { cd.textContent = cdText; cd.setAttribute('data-u', urgency); }
+    }
+
+    // --- Build the initial DOM structure (only once) ---
+
+    function bufferControlHTML(bufferKey, leadTime) {
+      return `<span class="buffer-control" data-buffer="${bufferKey}">` +
+        `<button class="buffer-btn" data-dir="-1">&minus;</button>` +
+        `<span class="buffer-value">${leadTime}m</span>` +
+        `<button class="buffer-btn" data-dir="1">&plus;</button>` +
+        `</span>`;
+    }
+
+    function updateAllBufferDisplays(bufferKey, value) {
+      document.querySelectorAll(`[data-buffer="${bufferKey}"] .buffer-value`).forEach(el => {
+        el.textContent = value + 'm';
+      });
+      document.querySelectorAll(`[data-buffer="${bufferKey}"] .buf-val`).forEach(el => {
+        el.textContent = value + 'm';
+      });
+    }
+
+    function wireBufferControl(bufferKey, getSectionConfig) {
+      const control = document.querySelector(`.buffer-control[data-buffer="${bufferKey}"]`);
+      if (!control) return;
+      control.querySelectorAll('.buffer-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const cfg = getSectionConfig();
+          cfg.leadTime = Math.max(0, Math.min(30, cfg.leadTime + parseInt(btn.dataset.dir)));
+          updateAllBufferDisplays(bufferKey, cfg.leadTime);
+          saveBuffers();
+          repatchAll();
+          tickCountdowns();
+        });
+      });
+    }
+
+    function buildStructure() {
+      // --- Detailed sections ---
+      const content = document.getElementById('content');
+      let html = '';
+      TRAM_STATIONS.forEach((station, i) => {
+        html += `
+        <div class="section" style="animation-delay:${0.1 + i * 0.05}s">
+          <div class="section-header">
+            <span class="section-label">${station.label}</span>
+            <span class="section-sublabel">${station.sublabel}</span>
+            ${bufferControlHTML(station.bufferKey, station.leadTime)}
+          </div>
+          <div class="departures" id="${station.containerId}"></div>
+        </div>`;
+      });
+      html += `
+        <div class="section" style="animation-delay:${0.1 + TRAM_STATIONS.length * 0.05}s">
+          <div class="section-header">
+            <span class="section-label">Trains to HB</span>
+            <span class="section-sublabel">Bahnhof Oerlikon</span>
+            ${bufferControlHTML(TRAIN_SECTION.bufferKey, TRAIN_SECTION.leadTime)}
+          </div>
+          <div class="departures" id="train-deps"></div>
+        </div>`;
+      content.innerHTML = html;
+
+      // Wire detail section buffer controls
+      TRAM_STATIONS.forEach((station, i) => {
+        wireBufferControl(station.bufferKey, () => TRAM_STATIONS[i]);
+      });
+      wireBufferControl(TRAIN_SECTION.bufferKey, () => TRAIN_SECTION);
+
+      // Detail sections always visible (toggle removed)
+
+      structureBuilt = true;
+    }
+
+    // --- Create a single tram row element ---
+
+    function createTramRow(dep, leadTime) {
+      const scheduled = dep.stop.departureTimestamp;
+      const delay = dep.stop.delay || 0;
+      const realTs = getRealTimestamp(dep);
+      const leave = leaveByInfo(realTs, leadTime);
+      const key = depKey(dep, 'tram');
+      const lineCss = `tram-${dep.number}`;
+
+      const row = document.createElement('div');
+      row.className = `dep-row${leave.missed ? ' missed' : ''}`;
+      row.dataset.key = key;
+      row.dataset.realTs = realTs;
+      row.dataset.lead = leadTime;
+      row.innerHTML =
+        `<span class="line-badge ${lineCss}">${dep.number}</span>` +
+        `<span class="dep-time">${formatTime(scheduled)}</span>` +
+        `<span class="dep-delay">${delay > 0 ? `+${delay}` : ''}</span>` +
+        `<span class="dep-dest">${dep.to}</span>` +
+        `<span class="countdown ${leave.css}">${leave.html}</span>`;
+      row.style.animation = 'rowReveal 0.45s ease-out both';
+      return row;
+    }
+
+    // --- Create a single train row element ---
+
+    function createTrainRow(dep, leadTime) {
+      const scheduled = dep.stop.departureTimestamp;
+      const delay = dep.stop.delay || 0;
+      const realTs = getRealTimestamp(dep);
+      const leave = leaveByInfo(realTs, leadTime);
+      const key = depKey(dep, 'train');
+      const platform = dep.stop.platform || '?';
+      const label = `${dep.category.trim()}${dep.number}`;
+      const travelMin = dep._travelMin;
+
+      const row = document.createElement('div');
+      row.className = `dep-row train-row${leave.missed ? ' missed' : ''}`;
+      row.dataset.key = key;
+      row.dataset.realTs = realTs;
+      row.dataset.lead = leadTime;
+
+      let inner =
+        `<span class="line-badge train">${label}</span>` +
+        `<span class="dep-time">${formatTime(scheduled)}</span>` +
+        `<span class="dep-delay">${delay > 0 ? `+${delay}` : ''}</span>` +
+        `<span class="dep-platform">${platform}</span>`;
+      if (travelMin) {
+        const fastest = travelMin <= 5;
+        inner += `<span class="dep-travel${fastest ? ' dep-travel-fast' : ''}">${travelMin}m</span>`;
+      }
+      inner +=
+        `<span class="dep-dest">${dep.to}</span>` +
+        `<span class="countdown ${leave.css}">${leave.html}</span>`;
+
+      row.innerHTML = inner;
+      row.style.animation = 'rowReveal 0.45s ease-out both';
+      return row;
+    }
+
+    // --- Diff and patch a departures container ---
+
+    function patchContainer(container, newDeps, createRowFn, type, leadTime) {
+      // Clear stale exiting rows to prevent duplicates on re-patch
+      container.querySelectorAll('.dep-row.exiting').forEach(r => r.remove());
+
+      const newKeys = new Set(newDeps.map(d => depKey(d, type)));
+      const existingRows = container.querySelectorAll('.dep-row');
+      const existingKeyMap = new Map();
+      existingRows.forEach(row => existingKeyMap.set(row.dataset.key, row));
+
+      existingKeyMap.forEach((row, key) => {
+        if (!newKeys.has(key)) {
+          row.classList.add('exiting');
+          row.addEventListener('animationend', () => row.remove(), { once: true });
+        }
+      });
+
+      let prevRow = null;
+      for (const dep of newDeps) {
+        const key = depKey(dep, type);
+        let row = existingKeyMap.get(key);
+
+        if (!row) {
+          row = createRowFn(dep, leadTime);
+          if (prevRow && prevRow.nextSibling) {
+            container.insertBefore(row, prevRow.nextSibling);
+          } else if (!prevRow) {
+            container.prepend(row);
+          } else {
+            container.appendChild(row);
+          }
+        } else {
+          row.dataset.realTs = getRealTimestamp(dep);
+          row.dataset.lead = leadTime;
+          const delay = dep.stop.delay || 0;
+          const delayEl = row.querySelector('.dep-delay');
+          if (delayEl) delayEl.textContent = delay > 0 ? `+${delay}` : '';
+
+          const platEl = row.querySelector('.dep-platform');
+          if (platEl) platEl.textContent = dep.stop.platform || '?';
+
+          row.style.animation = 'none';
+        }
+        prevRow = row;
+      }
+
+      if (newDeps.length > 0) {
+        const noDeps = container.querySelector('.no-deps');
+        if (noDeps) noDeps.remove();
+      } else if (!container.querySelector('.no-deps') && container.querySelectorAll('.dep-row:not(.exiting)').length === 0) {
+        container.innerHTML = '<p class="no-deps">No departures</p>';
+      }
+    }
+
+    // --- Update all countdowns (runs every second) ---
+
+    function tickCountdowns() {
+      document.querySelectorAll('.dep-row:not(.exiting)').forEach(row => {
+        const realTs = parseInt(row.dataset.realTs);
+        const lead = parseInt(row.dataset.lead) || 7;
+        if (!realTs) return;
+
+        const m = minsUntilLeave(realTs, lead);
+        if (m <= MISSED_REMOVE_MINUTES) {
+          row.classList.add('exiting');
+          row.addEventListener('animationend', () => row.remove(), { once: true });
+          return;
+        }
+
+        const leave = leaveByInfo(realTs, lead);
+        const cd = row.querySelector('.countdown');
+        if (!cd) return;
+
+        cd.className = `countdown ${leave.css}`;
+        cd.innerHTML = leave.html;
+
+        if (leave.missed && !row.classList.contains('missed')) {
+          row.classList.add('missed');
+        } else if (!leave.missed && row.classList.contains('missed')) {
+          row.classList.remove('missed');
+        }
+      });
+
+      // Also tick the transit map
+      renderTransitMap();
+    }
+
+    // --- Re-patch all sections from cached data ---
+
+    function repatchAll() {
+      TRAM_STATIONS.forEach((station, i) => {
+        if (!lastTramResults[i]) return;
+        const lt = station.leadTime;
+        const container = document.getElementById(station.containerId);
+        if (!container) return;
+        patchContainer(container, getViableDeps(lastTramResults[i], lt), createTramRow, 'tram', lt);
+      });
+
+      const trainLt = TRAIN_SECTION.leadTime;
+      const trainContainer = document.getElementById('train-deps');
+      if (trainContainer && lastTrains.length) {
+        patchContainer(trainContainer, getViableDeps(lastTrains, trainLt), createTrainRow, 'train', trainLt);
+      }
+
+      renderTransitMap();
+    }
+
+    // --- Main ---
+
+    async function update() {
+      try {
+        const tramFetches = TRAM_STATIONS.map(station => fetchTrams(station));
+        const [trains, ...tramResults] = await Promise.all([fetchTrains(), ...tramFetches]);
+
+        if (!structureBuilt) buildStructure();
+
+        lastTramResults = tramResults;
+        lastTrains = trains;
+
+        repatchAll();
+
+        lastRefreshAt = Date.now();
+        document.getElementById('footer').textContent =
+          `updated ${new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+      } catch (e) {
+        if (!structureBuilt) {
+          document.getElementById('footer').textContent = 'Failed to load. Retrying...';
+        }
+      }
+    }
+
+    update();
+    setInterval(update, REFRESH_INTERVAL);
+    setInterval(tickCountdowns, COUNTDOWN_TICK);
+
+    // --- Menu bar integration (only active inside Electron) ---
+    if (window.menubar && window.menubar.isMenuBar) {
+      document.body.classList.add('menubar-mode');
+
+      function pushTrayTitle() {
+        const rows = document.querySelectorAll('.dep-row:not(.exiting):not(.missed)');
+        let bestMins = null;
+        for (const row of rows) {
+          const ts = parseInt(row.dataset.realTs);
+          const lead = parseInt(row.dataset.lead) || 7;
+          if (!ts) continue;
+          const m = minsUntilLeave(ts, lead);
+          if (m <= -2) continue;
+          if (bestMins === null || m < bestMins) bestMins = m;
+        }
+
+        if (bestMins === null) {
+          window.menubar.updateTrayTitle('');
+        } else if (bestMins <= 0) {
+          window.menubar.updateTrayTitle('GO');
+        } else {
+          window.menubar.updateTrayTitle(`${bestMins}m`);
+        }
+      }
+
+      setInterval(pushTrayTitle, 1000);
+    }
+  </script>
+</body>
+</html>
