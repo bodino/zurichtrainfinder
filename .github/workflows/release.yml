@@ -33,4 +33,12 @@ jobs:
             dist/*.dmg
             dist/*.zip
           draft: false
-          generate_release_notes: true
+          body: |
+            ## Install
+
+            1. Download the `.dmg` file below
+            2. Before opening, run in Terminal:
+               ```
+               xattr -cr ~/Downloads/Zurich*.dmg
+               ```
+            3. Open the DMG and drag to Applications
