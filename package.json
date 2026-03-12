@@ -12,6 +12,7 @@
     "productName": "Zurich Train Finder",
     "afterPack": "./scripts/afterPack.js",
     "mac": {
+      "icon": "assets/icon.icns",
       "category": "public.app-category.utilities",
       "target": ["dmg", "zip"],
       "extendInfo": {
